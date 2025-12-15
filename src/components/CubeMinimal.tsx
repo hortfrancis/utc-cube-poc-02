@@ -1,45 +1,45 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 type Mode = "AUTO" | "DRAG";
 
-/**
- * A minimal, performant CSS cube with:
- * - slow automatic rotation
- * - pointer-based dragging
- * - no per-frame React re-renders
- */
 export default function CubeMinimal() {
-  // ----- UI / mode state (low frequency) -----
+  // UI state (for cursor etc.)
   const [mode, setMode] = useState<Mode>("AUTO");
 
-  // ----- DOM reference -----
+  // Mode ref (for the animation loop — avoids stale closure bugs)
+  const modeRef = useRef<Mode>("AUTO");
+  const setModeBoth = (next: Mode) => {
+    modeRef.current = next;
+    setMode(next);
+  };
+
   const cubeRef = useRef<HTMLDivElement | null>(null);
 
-  // ----- Animation refs (high frequency, no re-renders) -----
+  // RAF + timing
   const rafRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
 
+  // Rotation (high-frequency)
   const rotXRef = useRef<number>(-30);
   const rotYRef = useRef<number>(0);
 
-  // ----- Drag refs -----
+  // Drag tracking
   const pointerIdRef = useRef<number | null>(null);
   const dragStartXRef = useRef<number>(0);
   const dragStartYRef = useRef<number>(0);
   const dragStartRotXRef = useRef<number>(0);
   const dragStartRotYRef = useRef<number>(0);
 
-  // ----- Constants -----
+  // Constants (plain literals)
   const ATTRACT_X = -30;
-  const AUTO_SPEED = 15;     // degrees per second
-  const DRAG_SPEED = 0.3;    // degrees per pixel
-  const MAX_DT = 50;         // prevents tab-inactive jumps
+  const AUTO_SPEED = 15;  // deg/sec
+  const DRAG_SPEED = 0.3; // deg/px
+  const MAX_DT = 50;      // ms
 
-  // ----- Helpers -----
   const applyTransform = () => {
-    if (!cubeRef.current) return;
-    cubeRef.current.style.transform =
-      `rotateX(${rotXRef.current}deg) rotateY(${rotYRef.current}deg)`;
+    const el = cubeRef.current;
+    if (!el) return;
+    el.style.transform = `rotateX(${rotXRef.current}deg) rotateY(${rotYRef.current}deg)`;
   };
 
   const stopRAF = () => {
@@ -49,20 +49,17 @@ export default function CubeMinimal() {
     }
   };
 
-  const startRAF = () => {
-    stopRAF();
-    lastTimeRef.current = performance.now();
-    rafRef.current = requestAnimationFrame(tick);
-  };
+  const tick = (t: number) => {
+    if (modeRef.current !== "AUTO") return;
 
-  // ----- Animation loop (AUTO mode) -----
-  const tick = (time: number) => {
-    if (mode !== "AUTO") return;
+    // Initialize time on first frame after starting
+    if (lastTimeRef.current === 0) {
+      lastTimeRef.current = t;
+    }
 
-    let dt = time - lastTimeRef.current;
-    lastTimeRef.current = time;
+    let dt = t - lastTimeRef.current;
+    lastTimeRef.current = t;
 
-    // clamp dt to avoid huge jumps after tab inactivity
     dt = Math.min(dt, MAX_DT);
 
     rotXRef.current = ATTRACT_X;
@@ -72,15 +69,22 @@ export default function CubeMinimal() {
     rafRef.current = requestAnimationFrame(tick);
   };
 
-  // ----- Pointer handlers -----
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (!cubeRef.current) return;
+  const startRAF = () => {
+    stopRAF();
+    lastTimeRef.current = 0; // avoid performance.now(); init inside tick()
+    rafRef.current = requestAnimationFrame(tick);
+  };
 
-    setMode("DRAG");
+  // Pointer handlers
+  const onPointerDown = (e: React.PointerEvent) => {
+    const el = cubeRef.current;
+    if (!el) return;
+
+    setModeBoth("DRAG");
     stopRAF();
 
     pointerIdRef.current = e.pointerId;
-    cubeRef.current.setPointerCapture(e.pointerId);
+    el.setPointerCapture(e.pointerId);
 
     dragStartXRef.current = e.clientX;
     dragStartYRef.current = e.clientY;
@@ -89,7 +93,7 @@ export default function CubeMinimal() {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (mode !== "DRAG") return;
+    if (modeRef.current !== "DRAG") return;
     if (pointerIdRef.current !== e.pointerId) return;
 
     const dx = e.clientX - dragStartXRef.current;
@@ -102,50 +106,53 @@ export default function CubeMinimal() {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!cubeRef.current) return;
+    const el = cubeRef.current;
+    if (!el) return;
     if (pointerIdRef.current !== e.pointerId) return;
 
     try {
-      cubeRef.current.releasePointerCapture(e.pointerId);
-    } catch { }
+      el.releasePointerCapture(e.pointerId);
+    } catch {}
 
     pointerIdRef.current = null;
-    setMode("AUTO");
+
+    setModeBoth("AUTO");
     startRAF();
   };
 
-  // ----- Visibility handling -----
+  // Pause/resume on tab visibility
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.hidden) {
         stopRAF();
-      } else if (mode === "AUTO") {
+      } else if (modeRef.current === "AUTO") {
         startRAF();
       }
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
-    return () =>
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [mode]);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+    // no deps needed: we read mode from modeRef, and functions use refs
+  }, []);
 
-  // ----- Initial mount -----
+  // Initial mount
   useEffect(() => {
     rotXRef.current = ATTRACT_X;
     rotYRef.current = 0;
     applyTransform();
+
+    setModeBoth("AUTO");
     startRAF();
 
     return stopRAF;
+    // safe as written: constants are literals, and functions use refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ----- Render -----
   return (
     <div className="flex items-center justify-center py-24">
       <style>{`
-        .scene {
-          perspective: 900px;
-        }
+        .scene { perspective: 900px; }
         .cube {
           position: relative;
           width: 260px;
@@ -171,13 +178,13 @@ export default function CubeMinimal() {
         .right  { transform: rotateY( 90deg) translateZ(130px); background: #32cd32; }
         .left   { transform: rotateY(-90deg) translateZ(130px); background: #ff0000; }
         .top    { transform: rotateX( 90deg) translateZ(130px); background: #8a2be2; }
-        .bottom { transform: rotateX(-90deg) translateZ(130px); background: #444444; }
+        .bottom { transform: rotateX(-90deg) translateZ(130px); background: #444; }
       `}</style>
 
       <div className="scene">
         <div
           ref={cubeRef}
-          className="cube cursor-grab active:cursor-grabbing"
+          className={`cube ${mode === "DRAG" ? "cursor-grabbing" : "cursor-grab"}`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
