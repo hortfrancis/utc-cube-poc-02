@@ -32,9 +32,9 @@ export default function CubeMinimal() {
 
   // Constants (plain literals)
   const ATTRACT_X = -30;
-  const AUTO_SPEED = 15;  // deg/sec
+  const AUTO_SPEED = 15; // deg/sec
   const DRAG_SPEED = 0.3; // deg/px
-  const MAX_DT = 50;      // ms
+  const MAX_DT = 50; // ms
 
   const applyTransform = () => {
     const el = cubeRef.current;
@@ -75,7 +75,53 @@ export default function CubeMinimal() {
     rafRef.current = requestAnimationFrame(tick);
   };
 
-  // Pointer handlers
+  // --- Robust drag end (global safety net) -----------------------------
+
+  const cleanupGlobalDragListeners = () => {
+    window.removeEventListener("pointerup", onWindowPointerUp, true);
+    window.removeEventListener("pointercancel", onWindowPointerCancel, true);
+    window.removeEventListener("blur", onWindowBlur, true);
+  };
+
+  const endDrag = (pointerId?: number) => {
+    // If we know which pointer ended, ignore others
+    if (
+      pointerId !== undefined &&
+      pointerIdRef.current !== null &&
+      pointerId !== pointerIdRef.current
+    ) {
+      return;
+    }
+
+    // If we weren't dragging, nothing to do
+    if (modeRef.current !== "DRAG") {
+      cleanupGlobalDragListeners();
+      pointerIdRef.current = null;
+      return;
+    }
+
+    // Best-effort release capture
+    const el = cubeRef.current;
+    if (el && pointerIdRef.current !== null) {
+      try {
+        el.releasePointerCapture(pointerIdRef.current);
+      } catch { }
+    }
+
+    pointerIdRef.current = null;
+    cleanupGlobalDragListeners();
+
+    setModeBoth("AUTO");
+    startRAF();
+  };
+
+  // Window-level handlers (capture phase => very reliable)
+  const onWindowPointerUp = (ev: PointerEvent) => endDrag(ev.pointerId);
+  const onWindowPointerCancel = (ev: PointerEvent) => endDrag(ev.pointerId);
+  const onWindowBlur = () => endDrag();
+
+  // --- Pointer handlers -------------------------------------------------
+
   const onPointerDown = (e: React.PointerEvent) => {
     const el = cubeRef.current;
     if (!el) return;
@@ -84,7 +130,15 @@ export default function CubeMinimal() {
     stopRAF();
 
     pointerIdRef.current = e.pointerId;
-    el.setPointerCapture(e.pointerId);
+
+    // Capture helps, but we also install global listeners as a safety net
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch { }
+
+    window.addEventListener("pointerup", onWindowPointerUp, true);
+    window.addEventListener("pointercancel", onWindowPointerCancel, true);
+    window.addEventListener("blur", onWindowBlur, true);
 
     dragStartXRef.current = e.clientX;
     dragStartYRef.current = e.clientY;
@@ -106,18 +160,14 @@ export default function CubeMinimal() {
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    const el = cubeRef.current;
-    if (!el) return;
-    if (pointerIdRef.current !== e.pointerId) return;
+    // This is still useful when it *does* fire on the element,
+    // but the window listener is the real safety net.
+    endDrag(e.pointerId);
+  };
 
-    try {
-      el.releasePointerCapture(e.pointerId);
-    } catch {}
-
-    pointerIdRef.current = null;
-
-    setModeBoth("AUTO");
-    startRAF();
+  const onLostPointerCapture = () => {
+    // If the browser revokes capture, treat that as "drag ended"
+    endDrag();
   };
 
   // Pause/resume on tab visibility
@@ -132,10 +182,9 @@ export default function CubeMinimal() {
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-    // no deps needed: we read mode from modeRef, and functions use refs
   }, []);
 
-  // Initial mount
+  // Initial mount + cleanup
   useEffect(() => {
     rotXRef.current = ATTRACT_X;
     rotYRef.current = 0;
@@ -144,8 +193,10 @@ export default function CubeMinimal() {
     setModeBoth("AUTO");
     startRAF();
 
-    return stopRAF;
-    // safe as written: constants are literals, and functions use refs
+    return () => {
+      stopRAF();
+      cleanupGlobalDragListeners();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -188,7 +239,8 @@ export default function CubeMinimal() {
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          onPointerCancel={(e) => endDrag((e as React.PointerEvent).pointerId)}
+          onLostPointerCapture={onLostPointerCapture}
         >
           <div className="face front">1</div>
           <div className="face back">2</div>
