@@ -36,15 +36,18 @@ export default function CubeMinimal() {
   const DRAG_SPEED = 0.3; // deg/px
   const MAX_DT = 50; // ms
 
-  // New: delayed smooth return of X tilt
-  const RETURN_DELAY_MS = 1000; // <- tweak this
+  // NEW: wait in released pose before returning X
+  const WAIT_MS = 1000; // <- tweak this
   const RETURN_DURATION_MS = 600; // <- tweak this
 
   // Return-to-attract state
-  const returnTimeoutRef = useRef<number | null>(null);
+  const waitTimeoutRef = useRef<number | null>(null);
   const returnActiveRef = useRef<boolean>(false);
   const returnStartTimeRef = useRef<number>(0);
   const returnFromXRef = useRef<number>(ATTRACT_X);
+
+  // NEW: whether AUTO spin (Y rotation) is currently allowed
+  const spinEnabledRef = useRef<boolean>(true);
 
   const applyTransform = () => {
     const el = cubeRef.current;
@@ -65,25 +68,38 @@ export default function CubeMinimal() {
     rafRef.current = requestAnimationFrame(tick);
   };
 
-  const clearReturn = () => {
-    if (returnTimeoutRef.current !== null) {
-      window.clearTimeout(returnTimeoutRef.current);
-      returnTimeoutRef.current = null;
+  const clearWait = () => {
+    if (waitTimeoutRef.current !== null) {
+      window.clearTimeout(waitTimeoutRef.current);
+      waitTimeoutRef.current = null;
     }
+  };
+
+  const clearReturn = () => {
+    clearWait();
     returnActiveRef.current = false;
+    returnStartTimeRef.current = 0;
   };
 
-  const scheduleReturnToAttractX = () => {
+  // NEW: wait, then start a smooth X return
+  const scheduleWaitThenReturnX = () => {
     clearReturn();
-    returnTimeoutRef.current = window.setTimeout(() => {
-      // Start a smooth X return on the next ticks
+
+    // Freeze in released pose during wait (no Y spin)
+    spinEnabledRef.current = false;
+
+    waitTimeoutRef.current = window.setTimeout(() => {
+      // Start smooth X return
       returnFromXRef.current = rotXRef.current;
-      returnStartTimeRef.current = 0; // set on first tick after activation
+      returnStartTimeRef.current = 0;
       returnActiveRef.current = true;
-    }, RETURN_DELAY_MS);
+
+      // After waiting, resume spin (while returning X)
+      spinEnabledRef.current = true;
+    }, WAIT_MS);
   };
 
-  // Smoothstep easing (nice and simple)
+  // Smoothstep easing
   const easeInOut = (t: number) => t * t * (3 - 2 * t);
 
   const tick = (t: number) => {
@@ -96,10 +112,12 @@ export default function CubeMinimal() {
     lastTimeRef.current = t;
     dt = Math.min(dt, MAX_DT);
 
-    // Always spin around Y in AUTO
-    rotYRef.current += AUTO_SPEED * (dt / 1000);
+    // Only spin around Y when enabled
+    if (spinEnabledRef.current) {
+      rotYRef.current += AUTO_SPEED * (dt / 1000);
+    }
 
-    // Only return X after delay; otherwise preserve user-set X
+    // If active, animate X back to attract
     if (returnActiveRef.current) {
       if (returnStartTimeRef.current === 0) {
         returnStartTimeRef.current = t;
@@ -153,9 +171,9 @@ export default function CubeMinimal() {
     pointerIdRef.current = null;
     cleanupGlobalDragListeners();
 
-    // Resume auto immediately, but schedule a delayed X return
+    // Enter AUTO, but wait in place before returning X
     setModeBoth("AUTO");
-    scheduleReturnToAttractX();
+    scheduleWaitThenReturnX();
     startRAF();
   };
 
@@ -168,8 +186,11 @@ export default function CubeMinimal() {
     const el = cubeRef.current;
     if (!el) return;
 
-    // Stop any pending return while user is actively controlling it
+    // Stop any pending wait/return while user controls it
     clearReturn();
+
+    // While dragging, don’t auto-spin
+    spinEnabledRef.current = false;
 
     setModeBoth("DRAG");
     stopRAF();
@@ -227,8 +248,10 @@ export default function CubeMinimal() {
     applyTransform();
 
     setModeBoth("AUTO");
-    // In AUTO, we want it to be at attract tilt unless the user changes it
+
+    // Start in attract mode spinning
     clearReturn();
+    spinEnabledRef.current = true;
     startRAF();
 
     return () => {
