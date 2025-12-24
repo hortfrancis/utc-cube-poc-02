@@ -3,10 +3,10 @@ import React, { useEffect, useRef, useState } from "react";
 type Mode = "AUTO" | "DRAG";
 
 export default function CubeMinimal() {
-  // UI state (for cursor etc.)
+  // UI state (cursor etc.)
   const [mode, setMode] = useState<Mode>("AUTO");
 
-  // Mode ref (for the animation loop — avoids stale closure bugs)
+  // Mode ref (avoid stale closure)
   const modeRef = useRef<Mode>("AUTO");
   const setModeBoth = (next: Mode) => {
     modeRef.current = next;
@@ -16,11 +16,10 @@ export default function CubeMinimal() {
   const cubeRef = useRef<HTMLDivElement | null>(null);
 
   // RAF + timing
-  // RAF = requestAnimationFrame
   const rafRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
 
-  // Rotation (high-frequency)
+  // Rotation (high frequency)
   const rotXRef = useRef<number>(-30);
   const rotYRef = useRef<number>(0);
 
@@ -31,11 +30,21 @@ export default function CubeMinimal() {
   const dragStartRotXRef = useRef<number>(0);
   const dragStartRotYRef = useRef<number>(0);
 
-  // Constants (plain literals)
+  // Constants
   const ATTRACT_X = -30;
   const AUTO_SPEED = 15; // deg/sec
   const DRAG_SPEED = 0.3; // deg/px
   const MAX_DT = 50; // ms
+
+  // New: delayed smooth return of X tilt
+  const RETURN_DELAY_MS = 1000; // <- tweak this
+  const RETURN_DURATION_MS = 600; // <- tweak this
+
+  // Return-to-attract state
+  const returnTimeoutRef = useRef<number | null>(null);
+  const returnActiveRef = useRef<boolean>(false);
+  const returnStartTimeRef = useRef<number>(0);
+  const returnFromXRef = useRef<number>(ATTRACT_X);
 
   const applyTransform = () => {
     const el = cubeRef.current;
@@ -50,34 +59,69 @@ export default function CubeMinimal() {
     }
   };
 
+  const startRAF = () => {
+    stopRAF();
+    lastTimeRef.current = 0; // init inside tick
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const clearReturn = () => {
+    if (returnTimeoutRef.current !== null) {
+      window.clearTimeout(returnTimeoutRef.current);
+      returnTimeoutRef.current = null;
+    }
+    returnActiveRef.current = false;
+  };
+
+  const scheduleReturnToAttractX = () => {
+    clearReturn();
+    returnTimeoutRef.current = window.setTimeout(() => {
+      // Start a smooth X return on the next ticks
+      returnFromXRef.current = rotXRef.current;
+      returnStartTimeRef.current = 0; // set on first tick after activation
+      returnActiveRef.current = true;
+    }, RETURN_DELAY_MS);
+  };
+
+  // Smoothstep easing (nice and simple)
+  const easeInOut = (t: number) => t * t * (3 - 2 * t);
+
   const tick = (t: number) => {
     if (modeRef.current !== "AUTO") return;
 
-    // Initialize time on first frame after starting
-    if (lastTimeRef.current === 0) {
-      lastTimeRef.current = t;
-    }
+    // Init timestamp
+    if (lastTimeRef.current === 0) lastTimeRef.current = t;
 
     let dt = t - lastTimeRef.current;
     lastTimeRef.current = t;
-
     dt = Math.min(dt, MAX_DT);
 
-    rotXRef.current = ATTRACT_X;
+    // Always spin around Y in AUTO
     rotYRef.current += AUTO_SPEED * (dt / 1000);
+
+    // Only return X after delay; otherwise preserve user-set X
+    if (returnActiveRef.current) {
+      if (returnStartTimeRef.current === 0) {
+        returnStartTimeRef.current = t;
+      }
+      const elapsed = t - returnStartTimeRef.current;
+      const u = Math.min(1, elapsed / RETURN_DURATION_MS);
+      const eased = easeInOut(u);
+
+      rotXRef.current =
+        returnFromXRef.current + (ATTRACT_X - returnFromXRef.current) * eased;
+
+      if (u >= 1) {
+        rotXRef.current = ATTRACT_X;
+        returnActiveRef.current = false;
+      }
+    }
 
     applyTransform();
     rafRef.current = requestAnimationFrame(tick);
   };
 
-  const startRAF = () => {
-    stopRAF();
-    lastTimeRef.current = 0; // avoid performance.now(); init inside tick()
-    rafRef.current = requestAnimationFrame(tick);
-  };
-
-  // --- Robust drag end (global safety net) -----------------------------
-
+  // -------- Robust drag end (global safety net) --------
   const cleanupGlobalDragListeners = () => {
     window.removeEventListener("pointerup", onWindowPointerUp, true);
     window.removeEventListener("pointercancel", onWindowPointerCancel, true);
@@ -85,7 +129,6 @@ export default function CubeMinimal() {
   };
 
   const endDrag = (pointerId?: number) => {
-    // If we know which pointer ended, ignore others
     if (
       pointerId !== undefined &&
       pointerIdRef.current !== null &&
@@ -94,14 +137,12 @@ export default function CubeMinimal() {
       return;
     }
 
-    // If we weren't dragging, nothing to do
     if (modeRef.current !== "DRAG") {
       cleanupGlobalDragListeners();
       pointerIdRef.current = null;
       return;
     }
 
-    // Best-effort release capture
     const el = cubeRef.current;
     if (el && pointerIdRef.current !== null) {
       try {
@@ -112,27 +153,28 @@ export default function CubeMinimal() {
     pointerIdRef.current = null;
     cleanupGlobalDragListeners();
 
+    // Resume auto immediately, but schedule a delayed X return
     setModeBoth("AUTO");
+    scheduleReturnToAttractX();
     startRAF();
   };
 
-  // Window-level handlers (capture phase => very reliable)
   const onWindowPointerUp = (ev: PointerEvent) => endDrag(ev.pointerId);
   const onWindowPointerCancel = (ev: PointerEvent) => endDrag(ev.pointerId);
   const onWindowBlur = () => endDrag();
 
-  // --- Pointer handlers -------------------------------------------------
-
+  // -------- Pointer handlers --------
   const onPointerDown = (e: React.PointerEvent) => {
     const el = cubeRef.current;
     if (!el) return;
+
+    // Stop any pending return while user is actively controlling it
+    clearReturn();
 
     setModeBoth("DRAG");
     stopRAF();
 
     pointerIdRef.current = e.pointerId;
-
-    // Capture helps, but we also install global listeners as a safety net
     try {
       el.setPointerCapture(e.pointerId);
     } catch { }
@@ -160,16 +202,9 @@ export default function CubeMinimal() {
     applyTransform();
   };
 
-  const onPointerUp = (e: React.PointerEvent) => {
-    // This is still useful when it *does* fire on the element,
-    // but the window listener is the real safety net.
-    endDrag(e.pointerId);
-  };
+  const onPointerUp = (e: React.PointerEvent) => endDrag(e.pointerId);
 
-  const onLostPointerCapture = () => {
-    // If the browser revokes capture, treat that as "drag ended"
-    endDrag();
-  };
+  const onLostPointerCapture = () => endDrag();
 
   // Pause/resume on tab visibility
   useEffect(() => {
@@ -192,11 +227,14 @@ export default function CubeMinimal() {
     applyTransform();
 
     setModeBoth("AUTO");
+    // In AUTO, we want it to be at attract tilt unless the user changes it
+    clearReturn();
     startRAF();
 
     return () => {
       stopRAF();
       cleanupGlobalDragListeners();
+      clearReturn();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -240,7 +278,7 @@ export default function CubeMinimal() {
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={(e) => endDrag((e as React.PointerEvent).pointerId)}
+          onPointerCancel={onPointerUp}
           onLostPointerCapture={onLostPointerCapture}
         >
           <div className="face front">1</div>
