@@ -16,6 +16,7 @@ export default function CubeMinimal() {
   const cubeRef = useRef<HTMLDivElement | null>(null);
 
   // RAF + timing
+  // RAF = requestAnimationFrame
   const rafRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
 
