@@ -224,7 +224,6 @@ export default function CubeMinimal() {
   };
 
   const onPointerUp = (e: React.PointerEvent) => endDrag(e.pointerId);
-
   const onLostPointerCapture = () => endDrag();
 
   // Pause/resume on tab visibility
@@ -249,7 +248,6 @@ export default function CubeMinimal() {
 
     setModeBoth("AUTO");
 
-    // Start in attract mode spinning
     clearReturn();
     spinEnabledRef.current = true;
     startRAF();
@@ -261,6 +259,11 @@ export default function CubeMinimal() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // --- NEW: face button click handler (proof that clicking doesn’t drag) ---
+  const onFaceButtonClick = (faceNumber: number) => {
+    alert(`Face ${faceNumber} clicked`);
+  };
 
   return (
     <div className="flex items-center justify-center py-24">
@@ -281,11 +284,33 @@ export default function CubeMinimal() {
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 3rem;
-          font-weight: 700;
-          color: white;
           backface-visibility: hidden;
         }
+
+        /* NEW: centered button style */
+        .faceBtn {
+          width: 74px;
+          height: 74px;
+          border-radius: 12px;
+          border: 2px solid rgba(255,255,255,0.75);
+          background: rgba(0,0,0,0.18);
+          color: white;
+          font-size: 2rem;
+          font-weight: 800;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transform: translateZ(1px); /* helps ensure it feels "on top" */
+        }
+        .faceBtn:active {
+          transform: translateZ(1px) scale(0.98);
+        }
+        .faceBtn:focus {
+          outline: 3px solid rgba(255,255,255,0.65);
+          outline-offset: 3px;
+        }
+
         .front  { transform: rotateY(  0deg) translateZ(130px); background: #ff6f61; }
         .back   { transform: rotateY(180deg) translateZ(130px); background: #ffd700; }
         .right  { transform: rotateY( 90deg) translateZ(130px); background: #32cd32; }
@@ -304,12 +329,71 @@ export default function CubeMinimal() {
           onPointerCancel={onPointerUp}
           onLostPointerCapture={onLostPointerCapture}
         >
-          <div className="face front">1</div>
-          <div className="face back">2</div>
-          <div className="face right">3</div>
-          <div className="face left">4</div>
-          <div className="face top">5</div>
-          <div className="face bottom">6</div>
+          <div className="face front">
+            <button
+              type="button"
+              className="faceBtn"
+              onPointerDownCapture={(e) => e.stopPropagation()} // prevent drag start
+              onClick={() => onFaceButtonClick(1)}
+            >
+              1
+            </button>
+          </div>
+
+          <div className="face back">
+            <button
+              type="button"
+              className="faceBtn"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={() => onFaceButtonClick(2)}
+            >
+              2
+            </button>
+          </div>
+
+          <div className="face right">
+            <button
+              type="button"
+              className="faceBtn"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={() => onFaceButtonClick(3)}
+            >
+              3
+            </button>
+          </div>
+
+          <div className="face left">
+            <button
+              type="button"
+              className="faceBtn"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={() => onFaceButtonClick(4)}
+            >
+              4
+            </button>
+          </div>
+
+          <div className="face top">
+            <button
+              type="button"
+              className="faceBtn"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={() => onFaceButtonClick(5)}
+            >
+              5
+            </button>
+          </div>
+
+          <div className="face bottom">
+            <button
+              type="button"
+              className="faceBtn"
+              onPointerDownCapture={(e) => e.stopPropagation()}
+              onClick={() => onFaceButtonClick(6)}
+            >
+              6
+            </button>
+          </div>
         </div>
       </div>
     </div>
